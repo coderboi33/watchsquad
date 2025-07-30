@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2020", // Modern JS features
+    "module": "ESNext", // Output ESM
+    "moduleResolution": "node", // Resolve modules like Node.js
+    "rootDir": "src", // Your source code lives here
+    "esModuleInterop": true, // Enable default import from CJS
+    "forceConsistentCasingInFileNames": true, // Avoid case-sensitive errors
+    "strict": true, // Enable all strict type checks
+    "skipLibCheck": true, // Skip type checks on libraries
+    "resolveJsonModule": true, // Allow importing `.json` files
+    "isolatedModules": true, // Helps with `tsc --noEmit`
+    "allowSyntheticDefaultImports": true,
+    "noEmit": false
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}
