@@ -1,3 +1,4 @@
+//create rooms here and then head to a different file for logic in the rooms
 import express from "express";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -5,8 +6,8 @@ import https from "https";
 import cors from "cors";
 import { Server } from "socket.io";
 import mediasoup from "mediasoup";
-import { error } from "console";
-
+import RoomManager, { Room } from "./rooms.js";
+import registerRoomHandlers from "./handlers/registerRoomHandlers.js";
 
 dotenv.config();
 const options = {
@@ -32,16 +33,8 @@ const io = new Server(server, {
     },
 });
 
-const peers = io.of("/mediasoup");
-
 let worker: mediasoup.types.Worker<mediasoup.types.AppData>;
-let router: mediasoup.types.Router<mediasoup.types.AppData>;
-
-let producerTransport: mediasoup.types.WebRtcTransport<mediasoup.types.AppData>;
-let consumerTransport: mediasoup.types.WebRtcTransport<mediasoup.types.AppData>;
-
-let producer: mediasoup.types.Producer<mediasoup.types.AppData>;
-let consumer: mediasoup.types.Consumer<mediasoup.types.AppData>;
+let roomManager: RoomManager;
 
 const createWorker = async (): Promise<mediasoup.types.Worker<mediasoup.types.AppData>> => {
     console.log("Creating mediasoup worker...");
@@ -61,215 +54,24 @@ const createWorker = async (): Promise<mediasoup.types.Worker<mediasoup.types.Ap
     return newWorker;
 }
 
-worker = await createWorker();
+const room = io.of("/rooms");
 
-const mediaCodecs: mediasoup.types.RtpCodecCapability[] = [
-    {
-        kind: "audio",
-        mimeType: "audio/opus",
-        clockRate: 48000,
-        channels: 2,
-        preferredPayloadType: 96,
-        rtcpFeedback: [
-            { type: "transport-cc", parameter: "" },
-            { type: "nack", parameter: "" },
-            { type: "nack", parameter: "pli" }
-        ]
-    },
-    {
-        kind: "video",
-        mimeType: "video/VP8",
-        clockRate: 90000,
-        preferredPayloadType: 97,
-        rtcpFeedback: [
-            { type: "transport-cc", parameter: "" },
-            { type: "nack", parameter: "" },
-            { type: "nack", parameter: "pli" }
-        ]
-    }
-]
+(async () => {
+    worker = await createWorker();
+    roomManager = new RoomManager(worker);
 
-peers.on("connection", async (socket) => {
-    console.log(`Peer connected: ${socket.id}`);
-    socket.emit("ConnectionSuccess", { socketId: socket.id });
+    room.on("connection", (socket) => {
+        console.log(`Client connected to /rooms: ${socket.id}`);
 
-    socket.on("disconnect", () => {
-        console.log(`Peer disconnected: ${socket.id}`);
-    });
+        registerRoomHandlers(socket, roomManager);
 
-    router = await worker.createRouter({ mediaCodecs: mediaCodecs });
-
-    socket.on("getRouterRtpCapabilities", (callback) => {
-        console.log(`Router RTP capabilities requested by: ${socket.id}`);
-        const routerRtpCapabilities = router.rtpCapabilities;
-        callback({ routerRtpCapabilities });
-    });
-
-    socket.on("createTransport", async ({ sender }, callback) => {
-        if (sender) {
-            producerTransport = await createWebRtcTransport(callback);
-        }
-        else {
-            consumerTransport = await createWebRtcTransport(callback);
-        }
-    });
-
-    socket.on("connectProducerTransport", async ({ dtlsParameters }) => {
-        await producerTransport.connect({ dtlsParameters });
-        console.log(`Producer transport connected: ${producerTransport.id}`);
-    });
-
-    socket.on("transport-produce", async ({ kind, rtpParameters }, callback) => {
-        producer = await producerTransport?.produce({
-            kind,
-            rtpParameters
-        });
-
-        producer.on("transportclose", () => {
-            console.log(`Producer transport closed: ${producerTransport.id}`);
-            producer?.close();
-        })
-
-        await producer.resume();
-        callback({
-            id: producer?.id,
+        socket.on("disconnect", () => {
+            console.log(`Client disconnected: ${socket.id}`);
+            roomManager.removePeerFromRoom(socket.id);
         });
     });
 
-    socket.on("connectConsumerTransport", async ({ dtlsParameters }) => {
-        await consumerTransport.connect({ dtlsParameters });
-        console.log(`Consumer transport connected: ${consumerTransport.id}`);
+    server.listen(PORT, () => {
+        console.log(`Server listening on port ${PORT}`);
     });
-
-    socket.on("consumeMedia", async ({ rtpCapabilities }, callback) => {
-        try {
-            if (producer) {
-                if (!router.canConsume({
-                    producerId: producer.id,
-                    rtpCapabilities: rtpCapabilities
-                })) {
-                    console.log({ producer, rtpCapabilities });
-
-                    console.error("Cannot consume media, capabilities do not match", error);
-                    return;
-                }
-                console.log(`Consuming media from producer: ${producer.id}`);
-
-                consumer = await consumerTransport.consume({
-                    producerId: producer.id,
-                    rtpCapabilities: rtpCapabilities,
-                    paused: producer?.kind === "video",
-                });
-
-                consumer?.on("transportclose", () => {
-                    console.log("Producer closed");
-                    consumer?.close();
-                });
-
-                consumer?.on("producerclose", () => {
-                    console.log(`Producer closed: ${producer.id}`);
-                    consumer?.close();
-                });
-
-                callback({
-                    params: {
-                        id: consumer.id,
-                        producerId: producer.id,
-                        kind: consumer.kind,
-                        rtpParameters: consumer.rtpParameters,
-                    }
-                });
-            }
-        }
-        catch (error) {
-            console.error("Error consuming media:", error);
-            callback({
-                params: {
-                    error,
-                },
-            });
-            return;
-        }
-    });
-
-    socket.on("resumePausedConsumer", async () => {
-        if (consumer) {
-            console.log(`Consumer resumed: ${consumer.id}`);
-            await consumer?.resume();
-        }
-        else {
-            console.error("No consumer to resume");
-        }
-    });
-});
-
-const createWebRtcTransport = async (
-    callback: (arg0: {
-        params: {
-            id: string;
-            iceParameters: mediasoup.types.IceParameters;
-            iceCandidates: mediasoup.types.IceCandidate[];
-            dtlsParameters: mediasoup.types.DtlsParameters;
-        } | {
-            error: Error;
-        }
-    }) => void
-) => {
-    try {
-        const webRtcTranspoetOptions: mediasoup.types.WebRtcTransportOptions = {
-            listenIps: [
-                {
-                    ip: "127.0.0.1",
-                },
-            ],
-            enableUdp: true,
-            enableTcp: true,
-            preferUdp: true,
-        };
-
-        const transport = await router.createWebRtcTransport(webRtcTranspoetOptions);
-
-        console.log(`WebRTC transport created with ID: ${transport.id}`);
-
-        transport.on("dtlsstatechange", (dtlsState) => {
-            console.log(`DTLS state changed: ${dtlsState}`);
-            if (dtlsState === "closed") {
-                transport.close();
-            }
-        });
-
-        transport.on("@close", () => {
-            console.log(`WebRTC transport closed: ${transport.id}`);
-        });
-
-        callback({
-            params: {
-                id: transport.id,
-                iceParameters: transport.iceParameters,
-                iceCandidates: transport.iceCandidates,
-                dtlsParameters: transport.dtlsParameters
-            }
-        });
-
-        return transport;
-    }
-    catch (error) {
-        console.error("Error creating WebRTC transport:", error);
-        throw error;
-        callback({
-            params: {
-                error: new Error("Failed to create WebRTC transport"),
-            }
-        });
-    }
-};
-
-app.get("/", (req, res) => {
-    res.send("Welcome to the WatchSquad Server!");
-});
-
-server.listen(PORT, () => {
-    console.log(`Server is running on https://localhost:${PORT}`);
-});
-
-
+})();

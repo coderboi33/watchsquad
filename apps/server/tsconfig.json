@@ -11,7 +11,7 @@
     "resolveJsonModule": true, // Allow importing `.json` files
     "isolatedModules": true, // Helps with `tsc --noEmit`
     "allowSyntheticDefaultImports": true,
-    "noEmit": false
+    "noEmit": true,
   },
   "include": [
     "src"
