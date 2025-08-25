@@ -18,13 +18,16 @@ export default function registerRoomHandlers(socket: Socket, roomManager: RoomMa
 
             // Get a list of all producer IDs for producers that are already
             // in the room. We'll send this to the new client.
-            const producerIds = roomManager.getProducersForRoom(roomId, socketId);
+            const producersData = roomManager.getProducersForRoom(roomId, socketId);
 
             // Send the list of producers back to the client so they can consume them
-            callback({ producerIds });
+            if (callback)
+                callback({ producersData });
 
         } catch (e: any) {
             console.error("Error joining room:", e);
+            if (callback)
+                callback({ error: e.message });
         }
     });
 

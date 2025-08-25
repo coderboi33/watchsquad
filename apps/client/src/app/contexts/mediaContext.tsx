@@ -49,21 +49,16 @@ export const MediaProvider = ({ children }: { children: ReactNode }) => {
         }
     }, [localStream, isAudioOn, setIsAudioOn]); // <-- Add all dependencies here
 
-    // --- THIS IS THE CORRECTED LOGIC ---
     const toggleVideo = useCallback(() => {
-        const newIsVideoOn = !isVideoOn;
-        setIsVideoOn(newIsVideoOn);
-
-        if (newIsVideoOn) {
-            // If turning the video ON, get a new stream
-            startLocalStream();
-        } else {
-            // If turning the video OFF, stop the tracks
-            localStream?.getVideoTracks().forEach(track => track.stop());
-            // Optional: You might want to keep the stream object but with a dead track
-            // to avoid the video element disappearing entirely.
+        // This function only handles enabling/disabling the track
+        if (localStream) {
+            const newIsVideoOn = !isVideoOn;
+            localStream.getVideoTracks().forEach((track) => {
+                track.enabled = newIsVideoOn; // This mutes/unmutes the track
+            });
+            setIsVideoOn(newIsVideoOn);
         }
-    }, [localStream, isVideoOn, startLocalStream]);
+    }, [localStream, isVideoOn]);
 
 
     return (

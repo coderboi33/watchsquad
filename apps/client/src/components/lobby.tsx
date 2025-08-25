@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMedia } from '@/app/contexts/mediaContext';
-import MyVideo from './myVideo'; // Make sure this path is correct
+import MyVideo from './myVideo';
 
 export default function Lobby({ roomId }: { roomId: string }) {
     const router = useRouter();
@@ -29,9 +29,30 @@ export default function Lobby({ roomId }: { roomId: string }) {
         router.push(`/rooms/${roomId}`);
     };
 
+    // Moved RoomIdShare logic here
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(roomId);
+        } catch {
+            // fallback or error handling if needed
+        }
+    };
+
     return (
         <div className="p-5 max-w-xl mx-auto text-center">
             <h1 className="text-2xl font-bold mb-6">Ready to join?</h1>
+            {/* RoomIdShare UI */}
+            <div className="flex items-center justify-center gap-2 mb-4">
+                <span className="px-3 py-1 bg-zinc-800 text-white rounded font-mono text-sm select-all">{roomId}</span>
+                <button
+                    onClick={handleCopy}
+                    className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs"
+                    aria-label="Copy room ID"
+                    type="button"
+                >
+                    Copy
+                </button>
+            </div>
             <div className="relative w-full aspect-video bg-zinc-900 rounded-lg overflow-hidden mb-5 flex items-center justify-center">
 
                 {/* The MyVideo component handles the stream display */}

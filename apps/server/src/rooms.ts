@@ -148,18 +148,25 @@ export default class RoomManager {
     //     return producerIds;
     // }
 
+    // Inside your RoomManager class
+
     public getProducersForRoom(roomId: string, requestingSocketId: string): { producerId: string; peerId: string }[] {
         const room = this.rooms.get(roomId);
         if (!room) return [];
 
         const producersData: { producerId: string; peerId: string }[] = [];
+
+        // Iterate through each peer in the room
         for (const peer of room.peers.values()) {
+            // --- THIS IS THE FIX ---
+            // Only include producers from OTHER peers
             if (peer.socketId !== requestingSocketId) {
                 for (const producerId of peer.producers.keys()) {
                     producersData.push({ producerId, peerId: peer.socketId });
                 }
             }
         }
+
         return producersData;
     }
 

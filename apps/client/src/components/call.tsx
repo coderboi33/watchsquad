@@ -10,6 +10,21 @@ import { Device } from 'mediasoup-client';
 import { Consumer, Producer, Transport } from 'mediasoup-client/types';
 import RemoteVideo from './remoteVideo';
 
+// A new interface to hold combined streams for a single peer
+interface RemotePeer {
+    id: string; // This will be the peer's socketId
+    stream: MediaStream;
+    // Keep track of which producers belong to this peer
+    producerIds: Set<string>;
+}
+
+// Data shape for the server's 'join' callback
+interface ProducerData {
+    producerId: string;
+    peerId: string;
+}
+
+
 export default function Call({ roomId }: { roomId: string }) {
     const {
         localStream,
@@ -22,7 +37,8 @@ export default function Call({ roomId }: { roomId: string }) {
     const pageRouter = useRouter();
 
     // --- State and Refs ---
-    const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+    // const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+    const [remotePeers, setRemotePeers] = useState<Record<string, RemotePeer>>({});
     const socketRef = useRef<Socket | null>(null);
     const deviceRef = useRef<Device | null>(null);
     const producerTransportRef = useRef<Transport | null>(null);
@@ -48,9 +64,8 @@ export default function Call({ roomId }: { roomId: string }) {
 
         // --- Event: "new-producer" ---
         // A new peer has joined and started producing, let's consume them.
-        socket.on('new-producer', async ({ producerId }: { producerId: string }) => {
-            console.log(`A new producer has joined: ${producerId}`);
-            await consumeStream(socket, producerId);
+        socket.on('new-producer', ({ producerId, peerId }) => {
+            consumeStream(socket, producerId, peerId);
         });
 
         // --- Event: "peer-left" ---
@@ -59,14 +74,16 @@ export default function Call({ roomId }: { roomId: string }) {
         // For now, a simple page reload on peer departure can be a temporary solution
         // until you implement that logic. A more robust solution is outlined below.
         socket.on('peer-left', ({ peerId }) => {
-            console.log(`Peer ${peerId} has left the room.`);
-            // This is where you would remove the remote streams for the given peerId.
-            // For now, let's log it. We'll discuss a better way to handle this.
-            // TODO: Implement removal of remote streams associated with peerId
+            console.log(`Peer ${peerId} left`);
+            setRemotePeers(prev => {
+                const newPeers = { ...prev };
+                delete newPeers[peerId];
+                return newPeers;
+            });
         });
 
-        socket.emit('join', { roomId }, async ({ producerIds }: { producerIds: string[] }) => {
-            console.log(`Joined room. Found ${producerIds.length} existing producers.`);
+        socket.emit('join', { roomId }, async ({ producersData }: { producersData: ProducerData[] }) => {
+            // console.log(`Joined room. Found ${producersData.length} existing producers.`);
 
             // --- Server Event: "getRtpCapabilities" ---
             socket.emit('getRtpCapabilities', { roomId }, async (data: any) => {
@@ -80,8 +97,8 @@ export default function Call({ roomId }: { roomId: string }) {
                 await startProducing();
 
                 // Consume existing producers
-                for (const id of producerIds) {
-                    await consumeStream(socket, id);
+                for (const { producerId, peerId } of producersData) {
+                    await consumeStream(socket, producerId, peerId);
                 }
             });
         });
@@ -152,7 +169,7 @@ export default function Call({ roomId }: { roomId: string }) {
         }
     };
 
-    const consumeStream = async (socket: Socket, producerId: string) => {
+    const consumeStream = async (socket: Socket, producerId: string, peerId: string) => {
         if (!consumerTransportRef.current) return;
         const rtpCapabilities = deviceRef.current!.rtpCapabilities;
         const transport = consumerTransportRef.current;
@@ -166,15 +183,26 @@ export default function Call({ roomId }: { roomId: string }) {
 
             const { track } = consumer;
             const stream = new MediaStream([track]);
-            setRemoteStreams(prev => ({ ...prev, [producerId]: stream }));
+            setRemotePeers(prevPeers => {
+                const newPeers = { ...prevPeers };
+                let peer = newPeers[peerId];
 
-            // --- Server Event: "resume" ---
-            socket.emit('resume', { consumerId: consumer.id }, (data: { success?: boolean; error?: string }) => {
-                if (data.error) {
-                    console.error('Error resuming consumer:', data.error);
+                if (peer) {
+                    // If peer already exists, add the new track to their stream
+                    peer.stream.addTrack(track);
+                    peer.producerIds.add(producerId);
                 } else {
-                    console.log('Consumer resumed successfully');
+                    // If it's a new peer, create a new entry for them
+                    const newStream = new MediaStream([track]);
+                    peer = { id: peerId, stream: newStream, producerIds: new Set([producerId]) };
                 }
+
+                newPeers[peerId] = peer;
+                return newPeers;
+            });
+
+            socket.emit('resume', { consumerId: consumer.id }, () => {
+                console.log('Consumer resumed on server');
             });
         });
     };
@@ -187,8 +215,8 @@ export default function Call({ roomId }: { roomId: string }) {
     return (
         <div style={{ position: 'relative', width: '100vw', height: '100vh', background: '#222', color: 'white', overflow: 'hidden' }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '10px', padding: '10px' }}>
-                {Object.entries(remoteStreams).map(([producerId, stream]) => (
-                    <RemoteVideo key={producerId} stream={stream} />
+                {Object.entries(remotePeers).map(([peerId, peer]) => (
+                    <RemoteVideo key={peerId} stream={peer.stream} />
                 ))}
             </div>
 
