@@ -1,135 +1,104 @@
-# Turborepo starter
+WatchSquad 📹
+WatchSquad is a real-time video calling platform built with a modern tech stack. This project aims to provide a seamless and high-quality communication experience for everyone. It's currently in the foundational stage, with many exciting features on the horizon.
 
-This Turborepo starter is maintained by the Turborepo core team.
+🚀 About The Project
+This application is designed to be a simple yet powerful video-calling solution. It leverages WebSockets for real-time communication and is built on a high-performance Turborepo monorepo structure.
 
-## Using this example
+Built With
+This project is made possible by these incredible technologies:
 
-Run the following command:
+Monorepo: Turborepo
 
-```sh
-npx create-turbo@latest
-```
+Frontend: Next.js
 
-## What's inside?
+Backend: Express.js
 
-This Turborepo includes the following packages/apps:
+Real-time Communication: Socket.IO
 
-### Apps and Packages
+🔧 Getting Started
+Follow these instructions to get a copy of the project up and running on your local machine for development and testing purposes.
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+Prerequisites
+Make sure you have Node.js and npm (or yarn/pnpm) installed on your system.
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+Node.js (v18 or later recommended)
 
-### Utilities
+npm
 
-This Turborepo has some additional tools already setup for you:
+npm install npm@latest -g
 
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
+Installation & Setup
+Clone the repository
 
-### Build
+git clone https://github.com/coderboi33/watchsquad.git
 
-To build all apps and packages, run the following command:
+Navigate to the project directory
 
-```
-cd my-turborepo
+cd watchsquad
 
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build
+Install all dependencies
 
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build
-yarn dlx turbo build
-pnpm exec turbo build
-```
+npm install
 
-You can build a specific package by using a [filter](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters):
+Set up environment variables
 
-```
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build --filter=docs
+You will need to create two environment files for the frontend and backend applications.
 
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build --filter=docs
-yarn exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-```
+For the backend app (e.g., in apps/server), create a file named .env:
 
-### Develop
+PORT=5000
 
-To develop all apps and packages, run the following command:
+For the frontend Next.js app (e.g., in apps/web), create a file named .env.local:
 
-```
-cd my-turborepo
+# The URL should point to your backend server
+NEXT_PUBLIC_SOCKET_URL=http://localhost:5000
+NEXT_PUBLIC_API_URL=http://localhost:5000
 
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo dev
+Note: For local development, http:// is typically used. Adjust to wss:// or ws:// if you have a specific setup for secure WebSockets.
 
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo dev
-yarn exec turbo dev
-pnpm exec turbo dev
-```
+Usage
+Once the installation and setup are complete, you can run the application.
 
-You can develop a specific package by using a [filter](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters):
+Run the development server for all apps from the root directory:
 
-```
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo dev --filter=web
+npm run dev
 
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo dev --filter=web
-yarn exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
+This command will start both the frontend and backend servers concurrently. Open your browser and navigate to the frontend URL (usually http://localhost:3000) to see the application in action.
 
-### Remote Caching
+🗺️ Roadmap
+This project is still under development. Here are some of the features planned for future releases:
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
+[ ] User Authentication
 
-Turborepo can use a technique known as [Remote Caching](https://turborepo.com/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
+[ ] Multi-user video rooms
 
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
+[ ] Screen Sharing
 
-```
-cd my-turborepo
+[ ] Text Chat in rooms
 
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo login
+See the open issues for a full list of proposed features and known issues.
 
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo login
-yarn exec turbo login
-pnpm exec turbo login
-```
+🤝 Contributing
+Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are greatly appreciated.
 
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
+If you have a suggestion that would make this better, please fork the repo and create a pull request. You can also simply open an issue with the tag "enhancement".
 
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
+Fork the Project
 
-```
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo link
+Create your Feature Branch (git checkout -b feature/AmazingFeature)
 
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo link
-yarn exec turbo link
-pnpm exec turbo link
-```
+Commit your Changes (git commit -m 'Add some AmazingFeature')
 
-## Useful Links
+Push to the Branch (git push origin feature/AmazingFeature)
 
-Learn more about the power of Turborepo:
+Open a Pull Request
 
-- [Tasks](https://turborepo.com/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.com/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.com/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.com/docs/reference/configuration)
-- [CLI Usage](https://turborepo.com/docs/reference/command-line-reference)
+📄 License
+Distributed under the MIT License. See LICENSE.txt for more information.
+
+(Note: You will need to add a LICENSE.txt file to your repository. The MIT License is a popular choice.)
+
+📧 Contact
+Your Name - @your_twitter - your.email@example.com
+
+Project Link: https://github.com/coderboi33/watchsquad.git
