@@ -64,7 +64,6 @@ export default function Call({ roomId }: { roomId: string }) {
     const pageRouter = useRouter();
 
     // --- State and Refs ---
-    // const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
     const [remotePeers, setRemotePeers] = useState<Record<string, RemotePeer>>({});
     const socketRef = useRef<Socket | null>(null);
     const deviceRef = useRef<Device | null>(null);
@@ -97,11 +96,6 @@ export default function Call({ roomId }: { roomId: string }) {
             consumeStream(socket, producerId, peerId);
         });
 
-        // --- Event: "peer-left" ---
-        // A peer has left the room. We need to clean up their streams.
-        // NOTE: This requires a more advanced state structure to map peerId to producerIds.
-        // For now, a simple page reload on peer departure can be a temporary solution
-        // until you implement that logic. A more robust solution is outlined below.
         socket.on('peer-left', ({ peerId }) => {
             console.log(`Peer ${peerId} left`);
             setRemotePeers(prev => {
@@ -133,6 +127,38 @@ export default function Call({ roomId }: { roomId: string }) {
         });
 
     }, [roomId, pageRouter, stopLocalStream, localStream]);
+
+    // useEffect(() => {
+    //     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+    //         // This event fires when the user tries to close the tab or refresh.
+    //         // It's a good place to notify the server you're leaving.
+    //         if (socketRef.current) {
+    //             socketRef.current.emit('leave-room', { roomId });
+    //         }
+    //         // Most browsers will show a generic confirmation dialog.
+    //         // You can optionally try to set a custom message, but it's often ignored.
+    //         e.preventDefault();
+    //         e.returnValue = '';
+    //     };
+
+    //     const handlePopState = () => {
+    //         // This event fires when the user clicks the browser's back or forward buttons.
+    //         if (socketRef.current) {
+    //             socketRef.current.emit('leave-room', { roomId });
+    //         }
+    //         stopLocalStream();
+    //     };
+
+    //     // Attach the event listeners
+    //     window.addEventListener('beforeunload', handleBeforeUnload);
+    //     window.addEventListener('popstate', handlePopState);
+
+    //     // Cleanup function to remove the listeners when the component unmounts
+    //     return () => {
+    //         window.removeEventListener('beforeunload', handleBeforeUnload);
+    //         window.removeEventListener('popstate', handlePopState);
+    //     };
+    // }, [roomId, stopLocalStream]);
 
 
     console.log('Call component mounted', localStream);
@@ -252,7 +278,19 @@ export default function Call({ roomId }: { roomId: string }) {
         });
     };
 
-    const handleEndCall = () => { pageRouter.push('/') };
+    const handleEndCall = () => {
+        // Notify the server that you are leaving
+        if (socketRef.current) {
+            socketRef.current.emit('leave-room', { roomId });
+        }
+
+        // Stop your local camera and microphone
+        stopLocalStream();
+
+        // Navigate back to the homepage
+        pageRouter.push('/');
+    };
+
     const draggableRef = useRef<HTMLDivElement>(null);
     const resizeHandleRef = useRef<HTMLDivElement>(null);
     const { position, size } = useDraggable({ elRef: draggableRef, resizeHandleRef: resizeHandleRef });

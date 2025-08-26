@@ -165,6 +165,16 @@ export default function registerRoomHandlers(socket: Socket, roomManager: RoomMa
         }
     });
 
+    socket.on("leave-room", ({ roomId }) => {
+        console.log(`Peer ${socketId} is leaving room ${roomId}`);
+
+        // Notify other peers in the room
+        socket.to(roomId).emit("peer-left", { peerId: socketId });
+
+        // Clean up all resources associated with this peer
+        roomManager.removePeerFromRoom(socketId);
+    });
+
     socket.on("disconnect", () => {
         try {
             const peerInfo = roomManager.getPeer(socketId);
