@@ -7,7 +7,7 @@ import MyVideo from './myVideo';
 import { useRouter } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
 import { Device } from 'mediasoup-client';
-import { Consumer, Producer, Transport } from 'mediasoup-client/types';
+import { Consumer, Producer, Transport, RtpCapabilities, IceCandidate, DtlsParameters, IceParameters, MediaKind, RtpParameters } from 'mediasoup-client/types';
 import RemoteVideo from './remoteVideo';
 
 // A new interface to hold combined streams for a single peer
@@ -24,6 +24,33 @@ interface ProducerData {
     peerId: string;
 }
 
+interface routerRtpCapabilities {
+    routerRtpCapabilities: RtpCapabilities;
+}
+
+interface createTransportParams {
+    id: string;
+    iceParameters: IceParameters;
+    iceCandidates: IceCandidate[];
+    dtlsParameters: DtlsParameters;
+}
+
+interface connectTransportParams {
+    success: boolean;
+}
+
+interface produceResponseParams {
+    id: string;
+    error?: string;
+}
+
+interface consumeResponseParams {
+    id: string;
+    producerId: string;
+    kind: MediaKind;
+    rtpParameters: RtpParameters;
+    error?: string;
+}
 
 export default function Call({ roomId }: { roomId: string }) {
     const {
@@ -45,6 +72,8 @@ export default function Call({ roomId }: { roomId: string }) {
     const consumerTransportRef = useRef<Transport | null>(null);
     const producersRef = useRef<Record<string, Producer>>({});
     const consumersRef = useRef<Record<string, Consumer>>({});
+    const BACKEND_SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL;
+
 
     useEffect(() => {
 
@@ -55,7 +84,7 @@ export default function Call({ roomId }: { roomId: string }) {
         }
 
         // Now that we are sure the stream exists, connect to the server
-        const socket = io('wss://localhost:5000/rooms');
+        const socket = io(BACKEND_SOCKET_URL + '/rooms');
         socketRef.current = socket;
 
         socket.on("connected", async ({ socketId }) => {
@@ -86,7 +115,7 @@ export default function Call({ roomId }: { roomId: string }) {
             // console.log(`Joined room. Found ${producersData.length} existing producers.`);
 
             // --- Server Event: "getRtpCapabilities" ---
-            socket.emit('getRtpCapabilities', { roomId }, async (data: any) => {
+            socket.emit('getRtpCapabilities', { roomId }, async (data: routerRtpCapabilities) => {
                 const device = new Device();
                 await device.load({ routerRtpCapabilities: data.routerRtpCapabilities });
                 deviceRef.current = device;
@@ -111,14 +140,19 @@ export default function Call({ roomId }: { roomId: string }) {
     const createSendTransport = async (socket: Socket) => {
         return new Promise<void>((resolve) => {
             // --- Server Event: "createTransport" ---
-            socket.emit('createTransport', { isProducer: true }, (params: any) => {
+            socket.emit('createTransport', { isProducer: true }, (params: createTransportParams) => {
                 const transport = deviceRef.current!.createSendTransport(params);
                 producerTransportRef.current = transport;
 
                 transport.on('connect', ({ dtlsParameters }, callback, errback) => {
                     // --- Server Event: "connectTransport" ---
-                    socket.emit('connectTransport', { transportId: transport.id, dtlsParameters }, ({ success }) => {
-                        success ? callback() : errback(new Error('Transport connection failed.'));
+                    socket.emit('connectTransport', { transportId: transport.id, dtlsParameters }, ({ success }: connectTransportParams) => {
+                        if (success) {
+                            callback();
+                        }
+                        else {
+                            errback(new Error('Transport connection failed.'));
+                        }
                     });
                 });
 
@@ -126,7 +160,7 @@ export default function Call({ roomId }: { roomId: string }) {
                     try {
                         const { id } = await new Promise<{ id: string }>((res, rej) => {
                             // --- Server Event: "produce" ---
-                            socket.emit('produce', { transportId: transport.id, kind, rtpParameters }, (response) => {
+                            socket.emit('produce', { transportId: transport.id, kind, rtpParameters }, (response: produceResponseParams) => {
                                 if (response.error) rej(new Error(response.error));
                                 else res(response);
                             });
@@ -142,14 +176,19 @@ export default function Call({ roomId }: { roomId: string }) {
     const createRecvTransport = async (socket: Socket) => {
         return new Promise<void>((resolve) => {
             // --- Server Event: "createTransport" ---
-            socket.emit('createTransport', { isProducer: false }, (params: any) => {
+            socket.emit('createTransport', { isProducer: false }, (params: createTransportParams) => {
                 const transport = deviceRef.current!.createRecvTransport(params);
                 consumerTransportRef.current = transport;
 
                 transport.on('connect', ({ dtlsParameters }, callback, errback) => {
                     // --- Server Event: "connectTransport" ---
-                    socket.emit('connectTransport', { transportId: transport.id, dtlsParameters }, ({ success }) => {
-                        success ? callback() : errback(new Error('Transport connection failed.'));
+                    socket.emit('connectTransport', { transportId: transport.id, dtlsParameters }, ({ success }: connectTransportParams) => {
+                        if (success) {
+                            callback();
+                        }
+                        else {
+                            errback(new Error('Transport connection failed.'));
+                        }
                     });
                 });
                 resolve();
@@ -161,11 +200,17 @@ export default function Call({ roomId }: { roomId: string }) {
         if (!producerTransportRef.current) return;
         const videoTrack = localStream!.getVideoTracks()[0];
         if (videoTrack) {
-            producersRef.current['video'] = await producerTransportRef.current!.produce({ track: videoTrack, paused: !isVideoOn });
+            producersRef.current['video'] = await producerTransportRef.current!.produce({ track: videoTrack });
+            if (!isVideoOn) {
+                producersRef.current['video'].pause();
+            }
         }
         const audioTrack = localStream!.getAudioTracks()[0];
         if (audioTrack) {
-            producersRef.current['audio'] = await producerTransportRef.current!.produce({ track: audioTrack, paused: !isAudioOn });
+            producersRef.current['audio'] = await producerTransportRef.current!.produce({ track: audioTrack });
+            if (!isAudioOn) {
+                producersRef.current['audio'].pause();
+            }
         }
     };
 
@@ -175,14 +220,14 @@ export default function Call({ roomId }: { roomId: string }) {
         const transport = consumerTransportRef.current;
 
         // --- Server Event: "consume" ---
-        socket.emit('consume', { transportId: transport.id, producerId, rtpCapabilities }, async (params: any) => {
+        socket.emit('consume', { transportId: transport.id, producerId, rtpCapabilities }, async (params: consumeResponseParams) => {
             if (params.error) return console.error("Cannot consume", params.error);
 
             const consumer = await transport.consume(params);
             consumersRef.current[producerId] = consumer;
 
             const { track } = consumer;
-            const stream = new MediaStream([track]);
+            // const stream = new MediaStream([track]);
             setRemotePeers(prevPeers => {
                 const newPeers = { ...prevPeers };
                 let peer = newPeers[peerId];
