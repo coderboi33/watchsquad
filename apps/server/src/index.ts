@@ -1,7 +1,8 @@
 import express from "express";
 import dotenv from "dotenv";
 import fs from "fs";
-import https from "https";
+// import https from "https";
+import http from "http";
 import cors from "cors";
 import { Server } from "socket.io";
 import mediasoup from "mediasoup";
@@ -9,14 +10,15 @@ import RoomManager from "./rooms.js";
 import registerRoomHandlers from "./handlers/registerRoomHandlers.js";
 
 dotenv.config();
-const options = {
-    key: fs.readFileSync('./ssl/key.pem'),
-    cert: fs.readFileSync('./ssl/cert.pem')
-}
+// const options = {
+//     key: fs.readFileSync('./ssl/key.pem'),
+//     cert: fs.readFileSync('./ssl/cert.pem')
+// }
 
 const PORT = process.env.PORT || 5000; // Use a default port if not set
 const app = express();
-const server = https.createServer(options, app);
+// const server = https.createServer( app);
+const server = http.createServer(app);
 
 // Use express.json() middleware to parse JSON request bodies
 app.use(express.json());

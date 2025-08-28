@@ -4,6 +4,7 @@
     "module": "ESNext", // Output ESM
     "moduleResolution": "node", // Resolve modules like Node.js
     "rootDir": "src", // Your source code lives here
+    "outDir": "dist", // Compiled files go here
     "esModuleInterop": true, // Enable default import from CJS
     "forceConsistentCasingInFileNames": true, // Avoid case-sensitive errors
     "strict": true, // Enable all strict type checks
@@ -11,7 +12,7 @@
     "resolveJsonModule": true, // Allow importing `.json` files
     "isolatedModules": true, // Helps with `tsc --noEmit`
     "allowSyntheticDefaultImports": true,
-    "noEmit": true,
+    "noEmit": false,
   },
   "include": [
     "src"

@@ -8,8 +8,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node --loader ts-node/esm src/index.ts",
-    "dev": "nodemon"
+    "start": "node dist/index.js",
+    "dev": "nodemon",
+    "build": "tsc -b"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
