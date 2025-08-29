@@ -1,10 +1,13 @@
 import Lobby from "@/components/lobby";
 
-interface LobbyPageProps {
-    roomId: string;
+
+interface CallPageProps {
+    params: {
+        roomId: string;
+    };
 }
 
-export default async function LobbyPage({ params }: { params: LobbyPageProps }) {
+export default async function CallPage({ params }: CallPageProps) {
     const { roomId } = await params;
 
     return <Lobby roomId={roomId} />;
