@@ -4,8 +4,11 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMedia } from '@/app/contexts/mediaContext';
 import MyVideo from './myVideo';
+interface LobbyProps {
+    roomId: string;
+}
 
-export default function Lobby({ roomId }: { roomId: string }) {
+export default function Lobby({ roomId }: LobbyProps) {
     const router = useRouter();
     const {
         localStream,

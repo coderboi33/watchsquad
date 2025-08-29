@@ -4,7 +4,7 @@ interface LobbyPageProps {
     roomId: string;
 }
 
-export default async function LobbyPage(params: LobbyPageProps) {
+export default async function LobbyPage({ params }: { params: LobbyPageProps }) {
     const { roomId } = await params;
 
     return <Lobby roomId={roomId} />;
