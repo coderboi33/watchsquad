@@ -82,9 +82,10 @@ const createWorker = async () => {
      */
     app.post("/create-room", async (req, res) => {
         const { roomId } = req.body;
+        const router = await roomManager.getRoomRouter(roomId);
 
         // Check if the room already exists to prevent duplicates
-        if (roomManager.getRoomRouter(roomId)) {
+        if (router) {
             return res.status(409).json({ error: `Room "${roomId}" already exists.` }); // 409 Conflict
         }
 
@@ -105,9 +106,9 @@ const createWorker = async () => {
      * @returns {object} 200 - Confirmation that room exists
      * @returns {object} 404 - Room not found
      */
-    app.get("/check-room/:roomId", (req, res) => {
+    app.get("/check-room/:roomId", async (req, res) => {
         const { roomId } = req.params;
-        const router = roomManager.getRoomRouter(roomId);
+        const router = await roomManager.getRoomRouter(roomId);
 
         if (router) {
             // The room exists, so the client can proceed with the WebSocket connection

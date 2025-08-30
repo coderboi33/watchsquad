@@ -1,218 +1,188 @@
-import mediasoup from "mediasoup";
+import { types as MediasoupTypes } from 'mediasoup';
+import { createClient, RedisClientType } from 'redis';
+import { PeerData, RoomData, mediaCodecs } from './types.js'; // Import from types.ts
 
-// Define the structure for a peer and a room
-export interface Peer {
-    socketId: string;
-    producerTransports: Map<string, mediasoup.types.WebRtcTransport>;
-    consumerTransports: Map<string, mediasoup.types.WebRtcTransport>;
-    producers: Map<string, mediasoup.types.Producer>;
-    consumers: Map<string, mediasoup.types.Consumer>;
-}
-
-export interface Room {
-    router: mediasoup.types.Router;
-    peers: Map<string, Peer>; // key = socketId
-}
-
-// Media codecs configuration for the router
-const mediaCodecs: mediasoup.types.RtpCodecCapability[] = [
-    {
-        kind: "audio",
-        mimeType: "audio/opus",
-        clockRate: 48000,
-        channels: 2,
-    },
-    {
-        kind: "video",
-        mimeType: "video/VP8",
-        clockRate: 90000,
-        parameters: {
-            'x-google-start-bitrate': 1000,
-        },
-    },
-];
+const ROOM_KEY = (roomId: string) => `room:${roomId}`;
+const PEER_KEY = (socketId: string) => `peer:${socketId}`;
 
 export default class RoomManager {
-    private worker: mediasoup.types.Worker;
-    private rooms: Map<string, Room> = new Map(); // key = roomId
+    public redis: RedisClientType;
+    public worker: MediasoupTypes.Worker;
 
-    constructor(worker: mediasoup.types.Worker) {
+    // Mediasoup objects are process-specific and live in memory on this server instance
+    public routers = new Map<string, MediasoupTypes.Router>();
+    public transports = new Map<string, MediasoupTypes.Transport>();
+    public producers = new Map<string, MediasoupTypes.Producer>();
+    public consumers = new Map<string, MediasoupTypes.Consumer>();
+
+    constructor(worker: MediasoupTypes.Worker) {
         this.worker = worker;
+        this.redis = createClient({ url: process.env.REDIS_URL });
+        this.redis.on('error', (err) => console.error('Redis Client Error', err));
+        this.redis.connect();
+        console.log('RoomManager connected to Redis.');
     }
 
-    /**
-     * Creates a new room or returns the existing one.
-     */
-    public async getOrCreateRoom(roomId: string): Promise<mediasoup.types.Router> {
-        let room = this.rooms.get(roomId);
+    public async getPeerData(socketId: string): Promise<PeerData | null> {
+        const peerJson = await this.redis.get(PEER_KEY(socketId));
+        return peerJson ? JSON.parse(peerJson) : null;
+    }
 
-        if (room) {
-            return room.router;
+    public async getRoomData(roomId: string): Promise<RoomData | null> {
+        const roomJson = await this.redis.get(ROOM_KEY(roomId));
+        return roomJson ? JSON.parse(roomJson) : null;
+    }
+
+    public async getOrCreateRoom(roomId: string): Promise<MediasoupTypes.Router> {
+        if (this.routers.has(roomId)) {
+            return this.routers.get(roomId)!;
+        }
+
+        const roomExists = await this.redis.exists(ROOM_KEY(roomId));
+        if (!roomExists) {
+            const newRoom: RoomData = { id: roomId, peerIds: [] };
+            await this.redis.set(ROOM_KEY(roomId), JSON.stringify(newRoom));
         }
 
         const router = await this.worker.createRouter({ mediaCodecs });
-        room = { router, peers: new Map() };
-        this.rooms.set(roomId, room);
-
-        // When the router is closed, remove the room from the map
-        router.on('@close', () => {
-            this.rooms.delete(roomId);
-            console.log(`Room ${roomId} closed and removed.`);
-        });
-
+        this.routers.set(roomId, router);
         return router;
     }
 
-    /**
-     * Adds a new peer to the specified room.
-     */
-    public addPeerToRoom(roomId: string, socketId: string): void {
-        const room = this.rooms.get(roomId);
-        if (!room) {
-            throw new Error(`Room ${roomId} not found while trying to add peer.`);
-        }
-        if (room.peers.has(socketId)) {
-            console.warn(`Peer ${socketId} already in room ${roomId}.`);
-            return;
-        }
+    public async addPeerToRoom(roomId: string, socketId: string) {
+        const room = await this.getRoomData(roomId);
+        if (!room) throw new Error(`Room ${roomId} not found in Redis.`);
+        if (room.peerIds.includes(socketId)) return;
 
-        const newPeer: Peer = {
+        room.peerIds.push(socketId);
+        const newPeer: PeerData = {
             socketId,
-            producerTransports: new Map(),
-            consumerTransports: new Map(),
-            producers: new Map(),
-            consumers: new Map(),
+            roomId,
+            producerTransportIds: [],
+            consumerTransportIds: [],
+            producerIds: [],
+            consumerIds: [],
         };
-        room.peers.set(socketId, newPeer);
-        console.log(`Peer ${socketId} added to room ${roomId}.`);
+
+        await this.redis.multi()
+            .set(ROOM_KEY(roomId), JSON.stringify(room))
+            .set(PEER_KEY(socketId), JSON.stringify(newPeer))
+            .exec();
     }
 
-    /**
-     * Retrieves a peer by their socket ID from any room.
-     */
-    public getPeer(socketId: string): { peer: Peer; roomId: string } | undefined {
-        for (const [roomId, room] of this.rooms.entries()) {
-            if (room.peers.has(socketId)) {
-                return { peer: room.peers.get(socketId)!, roomId };
+    public async removePeerFromRoom(socketId: string) {
+        const peer = await this.getPeerData(socketId);
+        if (!peer) return;
+
+        // Close and remove any in-memory mediasoup objects for this peer
+        peer.producerTransportIds.forEach(id => this.transports.get(id)?.close());
+        peer.consumerTransportIds.forEach(id => this.transports.get(id)?.close());
+        peer.producerIds.forEach(id => this.producers.get(id)?.close());
+        peer.consumerIds.forEach(id => this.consumers.get(id)?.close());
+
+        const room = await this.getRoomData(peer.roomId);
+        if (room) {
+            const updatedPeerIds = room.peerIds.filter(id => id !== socketId);
+            if (updatedPeerIds.length === 0) {
+                await this.redis.del(ROOM_KEY(peer.roomId));
+                this.routers.get(peer.roomId)?.close();
+                this.routers.delete(peer.roomId);
+            } else {
+                room.peerIds = updatedPeerIds;
+                await this.redis.set(ROOM_KEY(peer.roomId), JSON.stringify(room));
             }
         }
+
+        await this.redis.del(PEER_KEY(socketId));
+        console.log(`Peer ${socketId} removed from Redis and resources closed.`);
+    }
+
+    public async getRoomRouter(roomId: string): Promise<MediasoupTypes.Router | undefined> {
+        // 1. First, check if the router already exists in this server's memory.
+        if (this.routers.has(roomId)) {
+            return this.routers.get(roomId);
+        }
+
+        // 2. If not, check the shared Redis store to see if the room exists.
+        const roomExists = await this.redis.exists(ROOM_KEY(roomId));
+
+        if (roomExists) {
+            // 3. If the room exists in Redis but not in this server's memory,
+            // create a new in-memory router instance for it.
+            const router = await this.worker.createRouter({ mediaCodecs });
+            this.routers.set(roomId, router);
+            return router;
+        }
+
+        // 4. If the room doesn't exist anywhere, return undefined.
         return undefined;
     }
 
-    /**
-     * Removes a peer and cleans up all their associated resources.
-     */
-    public removePeerFromRoom(socketId: string): void {
-        const peerInfo = this.getPeer(socketId);
-        if (!peerInfo) {
-            return;
-        }
-
-        const { peer, roomId } = peerInfo;
-        const room = this.rooms.get(roomId)!;
-
-        console.log(`Removing peer ${socketId} from room ${roomId}`);
-
-        // Close all associated Mediasoup objects
-        peer.producers.forEach(p => p.close());
-        peer.consumers.forEach(c => c.close());
-        peer.producerTransports.forEach(t => t.close());
-        peer.consumerTransports.forEach(t => t.close());
-
-        // Remove the peer from the room
-        room.peers.delete(socketId);
-
-        // If the room is now empty, close the router to clean up resources
-        if (room.peers.size === 0) {
-            console.log(`Room ${roomId} is empty, closing router.`);
-            room.router.close(); // This will trigger the '@close' event and delete the room from the map
-        }
-    }
-
-    // --- Getters and Setters for Peer Resources ---
-
-    public getRoomRouter(roomId: string): mediasoup.types.Router | undefined {
-        return this.rooms.get(roomId)?.router;
-    }
-
-    // public getProducersForRoom(roomId: string, requestingSocketId: string): string[] {
-    //     const room = this.rooms.get(roomId);
-    //     if (!room) return [];
-
-    //     const producerIds: string[] = [];
-    //     for (const peer of room.peers.values()) {
-    //         if (peer.socketId !== requestingSocketId) {
-    //             producerIds.push(...peer.producers.keys());
-    //         }
-    //     }
-    //     return producerIds;
-    // }
-
-    // Inside your RoomManager class
-
-    public getProducersForRoom(roomId: string, requestingSocketId: string): { producerId: string; peerId: string }[] {
-        const room = this.rooms.get(roomId);
-        if (!room) return [];
+    public async getProducersForRoom(roomId: string, requestingSocketId: string): Promise<{ producerId: string; peerId: string }[]> {
+        const room = await this.getRoomData(roomId);
+        if (!room) {
+            console.log("sending empty producers list");
+            return []; // Room doesn't exist
+        };
 
         const producersData: { producerId: string; peerId: string }[] = [];
-
-        // Iterate through each peer in the room
-        for (const peer of room.peers.values()) {
-            // --- THIS IS THE FIX ---
-            // Only include producers from OTHER peers
-            if (peer.socketId !== requestingSocketId) {
-                for (const producerId of peer.producers.keys()) {
-                    producersData.push({ producerId, peerId: peer.socketId });
+        for (const peerId of room.peerIds) {
+            // --- THIS CHECK IS CRUCIAL ---
+            // Only get producers for OTHER peers
+            const peer = await this.getPeerData(peerId);
+            if (peer) {
+                for (const producerId of peer.producerIds) {
+                    producersData.push({ producerId, peerId });
                 }
             }
         }
-
         return producersData;
     }
 
-    public setProducerTransport(socketId: string, transport: mediasoup.types.WebRtcTransport): void {
-        const peerInfo = this.getPeer(socketId);
-        if (peerInfo) {
-            peerInfo.peer.producerTransports.set(transport.id, transport);
-        }
+    public async setProducerTransport(socketId: string, transport: MediasoupTypes.WebRtcTransport) {
+        const peer = await this.getPeerData(socketId);
+        if (!peer) throw new Error(`Peer ${socketId} not found`);
+
+        peer.producerTransportIds.push(transport.id);
+        await this.redis.set(PEER_KEY(socketId), JSON.stringify(peer));
+        this.transports.set(transport.id, transport);
     }
 
-    public setConsumerTransport(socketId: string, transport: mediasoup.types.WebRtcTransport): void {
-        const peerInfo = this.getPeer(socketId);
-        if (peerInfo) {
-            peerInfo.peer.consumerTransports.set(transport.id, transport);
-        }
+    public async setConsumerTransport(socketId: string, transport: MediasoupTypes.WebRtcTransport) {
+        const peer = await this.getPeerData(socketId);
+        if (!peer) throw new Error(`Peer ${socketId} not found`);
+
+        peer.consumerTransportIds.push(transport.id);
+        await this.redis.set(PEER_KEY(socketId), JSON.stringify(peer));
+        this.transports.set(transport.id, transport);
     }
 
-    public addProducer(socketId: string, producer: mediasoup.types.Producer): void {
-        const peerInfo = this.getPeer(socketId);
-        if (peerInfo) {
-            peerInfo.peer.producers.set(producer.id, producer);
+    public async addProducer(socketId: string, producer: MediasoupTypes.Producer) {
+        const peer = await this.getPeerData(socketId);
+        if (!peer) throw new Error(`Peer ${socketId} not found`);
 
-            // When a producer is closed (e.g., camera is turned off), notify other peers
-            producer.on('@close', () => {
-                const room = this.rooms.get(peerInfo.roomId);
-                if (room) {
-                    room.peers.forEach(p => {
-                        if (p.socketId !== socketId) {
-                            p.consumers.forEach(consumer => {
-                                if (consumer.producerId === producer.id) {
-                                    // This event can be listened to on the client side
-                                    // to close the corresponding video element.
-                                    // The 'producerclose' event on the consumer will handle the actual closing.
-                                }
-                            });
-                        }
-                    });
-                }
-            });
-        }
+        peer.producerIds.push(producer.id);
+        await this.redis.set(PEER_KEY(socketId), JSON.stringify(peer));
+        this.producers.set(producer.id, producer);
     }
 
-    public addConsumer(socketId: string, consumer: mediasoup.types.Consumer): void {
-        const peerInfo = this.getPeer(socketId);
-        if (peerInfo) {
-            peerInfo.peer.consumers.set(consumer.id, consumer);
-        }
+    public async addConsumer(socketId: string, consumer: MediasoupTypes.Consumer) {
+        const peer = await this.getPeerData(socketId);
+        if (!peer) throw new Error(`Peer ${socketId} not found`);
+
+        peer.consumerIds.push(consumer.id);
+        await this.redis.set(PEER_KEY(socketId), JSON.stringify(peer));
+        this.consumers.set(consumer.id, consumer);
+    }
+    public getTransport(transportId: string): MediasoupTypes.Transport | undefined {
+        return this.transports.get(transportId);
+    }
+
+    public getProducer(producerId: string): MediasoupTypes.Producer | undefined {
+        return this.producers.get(producerId);
+    }
+
+    public getConsumer(consumerId: string): MediasoupTypes.Consumer | undefined {
+        return this.consumers.get(consumerId);
     }
 }

@@ -92,7 +92,11 @@ export default function Call({ roomId }: { roomId: string }) {
 
         // --- Event: "new-producer" ---
         // A new peer has joined and started producing, let's consume them.
-        socket.on('new-producer', ({ producerId, peerId }) => {
+        socket.on('new-producer', ({ producerId, peerId }: { producerId: string, peerId: string }) => {
+            // Don't consume your own producers
+            if (peerId === socket.id) return;
+
+            console.log(`New producer from another peer: ${producerId}`);
             consumeStream(socket, producerId, peerId);
         });
 
@@ -107,6 +111,7 @@ export default function Call({ roomId }: { roomId: string }) {
 
         socket.emit('join', { roomId }, async ({ producersData }: { producersData: ProducerData[] }) => {
             // console.log(`Joined room. Found ${producersData.length} existing producers.`);
+            console.log(`Joined room ${roomId}. Found existing producers.`, producersData);
 
             // --- Server Event: "getRtpCapabilities" ---
             socket.emit('getRtpCapabilities', { roomId }, async (data: routerRtpCapabilities) => {
@@ -114,13 +119,17 @@ export default function Call({ roomId }: { roomId: string }) {
                 await device.load({ routerRtpCapabilities: data.routerRtpCapabilities });
                 deviceRef.current = device;
 
-                // Create transports and produce media
                 await createSendTransport(socket);
                 await createRecvTransport(socket);
-                await startProducing();
+                await startProducing()
 
-                // Consume existing producers
+                console.log('Transports created');
+                console.log('Existing producers:', producersData);
+
+                // Consume the producers from users who are already there.
+                console.log(`Consuming ${producersData.length} existing producers`, producersData);
                 for (const { producerId, peerId } of producersData) {
+                    console.log(`Consuming existing producer ${producerId} from peer ${peerId}`);
                     await consumeStream(socket, producerId, peerId);
                 }
             });

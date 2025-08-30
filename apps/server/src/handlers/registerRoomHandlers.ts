@@ -1,53 +1,49 @@
 import { Socket } from "socket.io";
-import RoomManager from "../rooms.js";
+import RoomManager from "../rooms.js"; // This should be your Redis-based RoomManager
 
 export default function registerRoomHandlers(socket: Socket, roomManager: RoomManager) {
     const { id: socketId } = socket;
 
     socket.on("join", async ({ roomId }, callback) => {
         try {
-            // Ensure the mediasoup router for this room is created.
-            // This is idempotent, so it's safe to call even if the room already exists.
             await roomManager.getOrCreateRoom(roomId);
-
-            // Add the peer to our room's state
-            roomManager.addPeerToRoom(roomId, socketId);
-
-            // Join the socket.io room for broadcasting
+            await roomManager.addPeerToRoom(roomId, socketId);
             socket.join(roomId);
 
-            // Get a list of all producer IDs for producers that are already
-            // in the room. We'll send this to the new client.
-            const producersData = roomManager.getProducersForRoom(roomId, socketId);
+            const producersData = await roomManager.getProducersForRoom(roomId, socketId);
 
-            // Send the list of producers back to the client so they can consume them
-            if (callback)
+            console.log(`Peer ${socketId} joined room ${roomId}. Existing producers:`, producersData.forEach(p => console.log(p.producerId)));
+
+            // 2. Send that list back to the new client immediately via the callback.
+            if (callback) {
                 callback({ producersData });
-
+            }
         } catch (e: any) {
-            console.error("Error joining room:", e);
-            if (callback)
-                callback({ error: e.message });
+            if (callback) callback({ producersData: [], error: e.message });
         }
     });
 
     socket.on("getRtpCapabilities", async ({ roomId }, callback) => {
         try {
-            const router = roomManager.getRoomRouter(roomId);
-            const routerRtpCapabilities = router?.rtpCapabilities;
-            console.log("Router RTP Capabilities:", routerRtpCapabilities);
-            callback({ routerRtpCapabilities: routerRtpCapabilities });
+            console.log(`Getting RTP capabilities for room ${roomId}`);
+            const router = await roomManager.getRoomRouter(roomId);
+            if (!router) throw new Error(`Router for room ${roomId} not found.`);
+
+            callback({ routerRtpCapabilities: router.rtpCapabilities });
         } catch (e: any) {
-            console.error("Error getting RTP capabilities:", e);
+            console.error(`Error getting RTP capabilities for room ${roomId}:`, e);
+            if (callback) callback({ error: e.message });
         }
     });
 
     socket.on("createTransport", async ({ isProducer }, callback) => {
         try {
-            const peerInfo = roomManager.getPeer(socketId);
-            if (!peerInfo) throw new Error(`Peer ${socketId} not found`);
+            const peerData = await roomManager.getPeerData(socketId);
+            if (!peerData) throw new Error(`Peer ${socketId} not found`);
 
-            const router = roomManager.getRoomRouter(peerInfo.roomId)!;
+            const router = await roomManager.getRoomRouter(peerData.roomId);
+            if (!router) throw new Error(`Router for room ${peerData.roomId} not found`);
+
             const transport = await router.createWebRtcTransport({
                 listenIps: [{ ip: '127.0.0.1' /* TODO: Use announced IP for production */ }],
                 enableUdp: true,
@@ -56,12 +52,10 @@ export default function registerRoomHandlers(socket: Socket, roomManager: RoomMa
             });
 
             if (isProducer) {
-                roomManager.setProducerTransport(socketId, transport);
+                await roomManager.setProducerTransport(socketId, transport);
             } else {
-                roomManager.setConsumerTransport(socketId, transport);
+                await roomManager.setConsumerTransport(socketId, transport);
             }
-
-            console.log("Created transport:", transport.id, "for peer:", socketId);
 
             callback({
                 id: transport.id,
@@ -70,72 +64,64 @@ export default function registerRoomHandlers(socket: Socket, roomManager: RoomMa
                 dtlsParameters: transport.dtlsParameters,
             });
         } catch (e: any) {
-            callback({ error: e.message });
+            console.error(`Error creating transport for peer ${socketId}:`, e);
+            if (callback) callback({ error: e.message });
         }
     });
 
     socket.on("connectTransport", async ({ transportId, dtlsParameters }, callback) => {
         try {
-            const peerInfo = roomManager.getPeer(socketId);
-            if (!peerInfo) throw new Error(`Peer ${socketId} not found`);
-
-            const transport = peerInfo.peer.producerTransports.get(transportId) || peerInfo.peer.consumerTransports.get(transportId);
+            const transport = await roomManager.getTransport(transportId);
             if (!transport) throw new Error(`Transport ${transportId} not found`);
 
             await transport.connect({ dtlsParameters });
-
-            console.log("Transport connected:", transportId, "for peer:", socketId);
             callback({ success: true });
         } catch (e: any) {
-            callback({ error: e.message });
+            console.error(`Error connecting transport ${transportId} for peer ${socketId}:`, e);
+            if (callback) callback({ error: e.message });
         }
     });
 
     socket.on("produce", async ({ transportId, kind, rtpParameters }, callback) => {
         try {
-            const peerInfo = roomManager.getPeer(socketId);
-            if (!peerInfo) throw new Error(`Peer ${socketId} not found`);
-
-            const transport = peerInfo.peer.producerTransports.get(transportId);
-            if (!transport) throw new Error(`Producer transport ${transportId} not found`);
+            const transport = await roomManager.getTransport(transportId);
+            if (!transport) throw new Error(`Transport ${transportId} not found`);
 
             const producer = await transport.produce({ kind, rtpParameters });
-            roomManager.addProducer(socketId, producer);
+            await roomManager.addProducer(socketId, producer);
+            console.log(`Peer ${socketId} produced a new ${kind} producer with ID ${producer.id}`);
 
-            // Inform other peers in the room about the new producer
-            socket.to(peerInfo.roomId).emit("new-producer", { producerId: producer.id, peerId: socketId });
-            console.log("New producer added:", producer.id, "for peer:", socketId);
+            const peerData = await roomManager.getPeerData(socketId);
+            if (peerData) {
+                socket.to(peerData.roomId).emit("new-producer", { producerId: producer.id, peerId: socketId });
+            }
 
             callback({ id: producer.id });
         } catch (e: any) {
-            callback({ error: e.message });
+            console.error(`Error producing on transport ${transportId} for peer ${socketId}:`, e);
+            if (callback) callback({ error: e.message });
         }
     });
 
     socket.on("consume", async ({ transportId, producerId, rtpCapabilities }, callback) => {
         try {
-            const peerInfo = roomManager.getPeer(socketId);
-            if (!peerInfo) throw new Error(`Peer ${socketId} not found`);
+            const transport = await roomManager.getTransport(transportId);
+            if (!transport) throw new Error(`Transport ${transportId} not found`);
 
-            const router = roomManager.getRoomRouter(peerInfo.roomId)!;
-            if (!router.canConsume({ producerId, rtpCapabilities })) {
-                throw new Error("Client cannot consume this producer");
+            const peerData = await roomManager.getPeerData(socketId);
+            if (!peerData) throw new Error(`Peer ${socketId} not found`);
+
+            const router = await roomManager.getRoomRouter(peerData.roomId);
+            if (!router || !router.canConsume({ producerId, rtpCapabilities })) {
+                throw new Error(`Client cannot consume producer ${producerId}`);
             }
 
-            const transport = peerInfo.peer.consumerTransports.get(transportId);
-            if (!transport) throw new Error(`Consumer transport ${transportId} not found`);
-
-            const consumer = await transport.consume({
-                producerId,
-                rtpCapabilities,
-                paused: true,
-            });
-            roomManager.addConsumer(socketId, consumer);
+            const consumer = await transport.consume({ producerId, rtpCapabilities, paused: true });
+            await roomManager.addConsumer(socketId, consumer);
 
             consumer.on("producerclose", () => {
                 socket.emit("consumer-closed", { consumerId: consumer.id });
             });
-            console.log("Consumer created:", consumer.id, "for peer:", socketId);
 
             callback({
                 id: consumer.id,
@@ -144,77 +130,34 @@ export default function registerRoomHandlers(socket: Socket, roomManager: RoomMa
                 rtpParameters: consumer.rtpParameters,
             });
         } catch (e: any) {
-            callback({ error: e.message });
+            console.error(`Error consuming producer ${producerId} for peer ${socketId}:`, e);
+            if (callback) callback({ error: e.message });
         }
     });
 
     socket.on("resume", async ({ consumerId }, callback) => {
         try {
-            const peerInfo = roomManager.getPeer(socketId);
-            if (!peerInfo) throw new Error(`Peer not found`);
-
-            const consumer = peerInfo.peer.consumers.get(consumerId);
-            if (!consumer) throw new Error(`Consumer not found`);
+            const consumer = await roomManager.getConsumer(consumerId);
+            if (!consumer) throw new Error(`Consumer ${consumerId} not found`);
 
             await consumer.resume();
-
-            console.log("Consumer resumed:", consumerId, "for peer:", socketId);
             callback({ success: true });
         } catch (e: any) {
-            callback({ error: e.message });
+            console.error(`Error resuming consumer ${consumerId} for peer ${socketId}:`, e);
+            if (callback) callback({ error: e.message });
         }
     });
 
-    socket.on("leave-room", ({ roomId }) => {
-        console.log(`Peer ${socketId} is leaving room ${roomId}`);
-
-        // Notify other peers in the room
+    socket.on("leave-room", async ({ roomId }) => {
         socket.to(roomId).emit("peer-left", { peerId: socketId });
-
-        // Clean up all resources associated with this peer
-        roomManager.removePeerFromRoom(socketId);
+        await roomManager.removePeerFromRoom(socketId);
     });
 
-    socket.on("disconnect", () => {
-        try {
-            const peerInfo = roomManager.getPeer(socketId);
-            if (!peerInfo) {
-                // This can happen if the server restarts and a client tries to reconnect
-                return;
-            }
-
-            console.log(`Peer disconnected: ${socketId}`);
-
-            // Notify other peers in the room that this peer has left
-            socket.to(peerInfo.roomId).emit("peer-left", { peerId: socketId });
-
-            // Clean up all resources associated with this peer
-            roomManager.removePeerFromRoom(socketId);
-
-        } catch (e: any) {
-            console.error(`Error handling disconnect for peer ${socketId}:`, e);
+    socket.on("disconnect", async () => {
+        const peerData = await roomManager.getPeerData(socketId);
+        if (peerData) {
+            socket.to(peerData.roomId).emit("peer-left", { peerId: socketId });
+            await roomManager.removePeerFromRoom(socketId);
         }
     });
-
-    // socket.on("disconnect", () => {
-    //     try {
-    //         const peerInfo = roomManager.getPeer(socketId);
-    //         if (!peerInfo) {
-    //             // This can happen if the server restarts and a client tries to reconnect
-    //             return;
-    //         }
-
-    //         console.log(`Peer disconnected: ${socketId}`);
-
-    //         // Notify other peers in the room that this peer has left
-    //         socket.to(peerInfo.roomId).emit("peer-left", { peerId: socketId });
-
-    //         // Clean up all resources associated with this peer
-    //         roomManager.removePeerFromRoom(socketId);
-
-    //     } catch (e: any) {
-    //         console.error(`Error handling disconnect for peer ${socketId}:`, e);
-    //     }
-    // });
-
 }
