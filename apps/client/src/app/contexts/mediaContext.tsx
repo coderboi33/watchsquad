@@ -28,38 +28,45 @@ export const MediaProvider = ({ children }: { children: ReactNode }) => {
         } catch (error) {
             console.error('Error accessing media devices.', error);
         }
-    }, []); // <-- Empty array makes it stable
+    }, []);
 
-    // This function will also be created only once
     const stopLocalStream = useCallback(() => {
-        // Use a functional update to access the latest stream without needing it as a dependency
         setLocalStream(currentStream => {
             currentStream?.getTracks().forEach(track => track.stop());
             return null;
         });
-    }, []); // <-- Empty array makes it stable
+    }, []);
 
     const toggleAudio = useCallback(() => {
-        if (localStream) {
-            const isEnabled = !isAudioOn;
-            localStream.getAudioTracks().forEach((track) => {
-                track.enabled = isEnabled;
+        // --- CHANGE ---
+        // Using a "functional update" for `setIsAudioOn`.
+        // This gives you the previous state value safely, so you don't need
+        // to include `isAudioOn` in the dependency array.
+        setIsAudioOn(prevIsAudioOn => {
+            const newIsAudioOn = !prevIsAudioOn;
+            localStream?.getAudioTracks().forEach(track => {
+                track.enabled = newIsAudioOn;
             });
-            setIsAudioOn(isEnabled);
-        }
-    }, [localStream, isAudioOn, setIsAudioOn]); // <-- Add all dependencies here
+            return newIsAudioOn;
+        });
+        // --- CHANGE ---
+        // The dependency array now only needs `localStream`. This makes the function
+        // more stable and prevents unnecessary re-creations.
+    }, [localStream]);
 
     const toggleVideo = useCallback(() => {
-        // This function only handles enabling/disabling the track
-        if (localStream) {
-            const newIsVideoOn = !isVideoOn;
-            localStream.getVideoTracks().forEach((track) => {
-                track.enabled = newIsVideoOn; // This mutes/unmutes the track
+        // --- CHANGE ---
+        // Using a "functional update" for `setIsVideoOn` for the same reason.
+        setIsVideoOn(prevIsVideoOn => {
+            const newIsVideoOn = !prevIsVideoOn;
+            localStream?.getVideoTracks().forEach(track => {
+                track.enabled = newIsVideoOn;
             });
-            setIsVideoOn(newIsVideoOn);
-        }
-    }, [localStream, isVideoOn]);
-
+            return newIsVideoOn;
+        });
+        // --- CHANGE ---
+        // The dependency array is now more stable.
+    }, [localStream]);
 
     return (
         <MediaContext.Provider value={{
