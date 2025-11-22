@@ -1,4 +1,5 @@
 import mediasoup from 'mediasoup';
+import { createClient } from 'redis';
 
 // These interfaces define the shape of the data we will store in Redis.
 export interface PeerData {
@@ -9,6 +10,8 @@ export interface PeerData {
     producerIds: string[];
     consumerIds: string[];
 }
+
+export type AppRedisClient = ReturnType<typeof createClient>;
 
 export interface RoomData {
     id: string;

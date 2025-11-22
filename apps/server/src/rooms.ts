@@ -1,12 +1,11 @@
 import { types as MediasoupTypes } from 'mediasoup';
-import { createClient, RedisClientType } from 'redis';
-import { PeerData, RoomData, mediaCodecs } from './types.js'; // Import from types.ts
+import { AppRedisClient, PeerData, RoomData, mediaCodecs } from './types.js'; // Import from types.ts
 
 const ROOM_KEY = (roomId: string) => `room:${roomId}`;
 const PEER_KEY = (socketId: string) => `peer:${socketId}`;
 
 export default class RoomManager {
-    public redis: RedisClientType;
+    public redis: AppRedisClient;
     public worker: MediasoupTypes.Worker;
 
     // Mediasoup objects are process-specific and live in memory on this server instance
@@ -15,13 +14,12 @@ export default class RoomManager {
     public producers = new Map<string, MediasoupTypes.Producer>();
     public consumers = new Map<string, MediasoupTypes.Consumer>();
 
-    constructor(worker: MediasoupTypes.Worker) {
+    constructor(worker: MediasoupTypes.Worker, redisClient: AppRedisClient) {
         this.worker = worker;
-        this.redis = createClient({ url: process.env.REDIS_URL });
-        this.redis.on('error', (err) => console.error('Redis Client Error', err));
-        this.redis.connect();
+        this.redis = redisClient;
         console.log('RoomManager connected to Redis.');
     }
+
 
     public async getPeerData(socketId: string): Promise<PeerData | null> {
         const peerJson = await this.redis.get(PEER_KEY(socketId));

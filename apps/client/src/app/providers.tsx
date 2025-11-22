@@ -1,5 +1,4 @@
 "use client";
-
 import { MediaProvider } from '@/app/contexts/mediaContext';
 import { ReactNode } from 'react';
 

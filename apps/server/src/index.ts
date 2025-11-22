@@ -8,6 +8,26 @@ import { Server } from "socket.io";
 import mediasoup from "mediasoup";
 import RoomManager from "./rooms.js";
 import registerRoomHandlers from "./handlers/registerRoomHandlers.js";
+import { createClient } from 'redis';
+
+const client = createClient({
+    username: 'default',
+    password: 'Sef3sX506oVg6dKm4A3UXpsMW68saQcD',
+    socket: {
+        host: 'redis-16945.c257.us-east-1-3.ec2.cloud.redislabs.com',
+        port: 16945
+    }
+});
+
+client.on('error', err => console.log('Redis Client Error', err));
+
+await client.connect();
+
+await client.set('foo', 'bar');
+const result = await client.get('foo');
+console.log(result)  // >>> bar
+
+
 
 dotenv.config();
 // const options = {
@@ -65,7 +85,7 @@ const createWorker = async () => {
 // Self-invoking async function to start the server
 (async () => {
     worker = await createWorker();
-    roomManager = new RoomManager(worker);
+    roomManager = new RoomManager(worker, client);
 
     app.get("/", (req, res) => {
         res.send("Welcome to the Video Conference Server");
