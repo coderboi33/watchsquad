@@ -24,5 +24,9 @@
   "workspaces": [
     "apps/*",
     "packages/*"
-  ]
+  ],
+  "optionalDependencies": {
+    "@next/swc-linux-x64-gnu": "15.5.2",
+    "@next/swc-linux-x64-musl": "15.5.2"
+  }
 }
