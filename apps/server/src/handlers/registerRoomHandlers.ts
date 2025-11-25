@@ -45,7 +45,7 @@ export default function registerRoomHandlers(socket: Socket, roomManager: RoomMa
             if (!router) throw new Error(`Router for room ${peerData.roomId} not found`);
 
             const transport = await router.createWebRtcTransport({
-                listenIps: [{ ip: '127.0.0.1' /* TODO: Use announced IP for production */ }],
+                listenIps: [{ ip: '0.0.0.0' /* TODO: Use announced IP for production */ }],
                 enableUdp: true,
                 enableTcp: true,
                 preferUdp: true,

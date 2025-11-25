@@ -68,7 +68,7 @@ const createWorker = async () => {
     console.log("Creating mediasoup worker...");
     const newWorker = await mediasoup.createWorker({
         rtcMinPort: 2000,
-        rtcMaxPort: 2020,
+        rtcMaxPort: 2100,
         logLevel: "debug",
         logTags: ["info", "ice", "dtls", "rtp", "srtp", "rtcp"],
     })
